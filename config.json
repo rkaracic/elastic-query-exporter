@@ -1,0 +1,19 @@
+{
+    "elasticsearch_url": "https://localhost:9200",
+    "elasticsearch_username": "your_username",
+    "elasticsearch_password": "your_password",
+    "elasticsearch_ca_cert_path": "/path/to/ca.crt",
+    "queries_path": "/path/to/queries",
+    "prometheus_port": 8000,
+    "queries": [
+        {
+            "name": "upit1",
+            "type": "default",
+            "query": {
+                "match": {
+                    "field": "value"
+                }
+            }
+        }
+    ]
+}

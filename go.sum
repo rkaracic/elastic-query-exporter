@@ -1,0 +1,4 @@
+github.com/elastic/go-elasticsearch/v8 v8.0.0 h1:Wm3X9E5nM9uA+QYlI2l9b5KXQkL7oXf3TqWzWg4tJ6c=
+github.com/elastic/go-elasticsearch/v8 v8.0.0/go.mod h1:Wm3X9E5nM9uA+QYlI2l9b5KXQkL7oXf3TqWzWg4tJ6c=
+github.com/prometheus/client_golang v1.14.0 h1:YjH2XkM5yU+YpB4B7ePzVTI6OaZpG7JdE5N4yF3aZkI=
+github.com/prometheus/client_golang v1.14.0/go.mod h1:YjH2XkM5yU+YpB4B7ePzVTI6OaZpG7JdE5N4yF3aZkI=

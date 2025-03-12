@@ -1,0 +1,30 @@
+version: '3'
+
+services:
+  exporter:
+    build: .
+    ports:
+      - "8000:8000"
+    depends_on:
+      - elasticsearch
+    environment:
+      - ELASTICSEARCH_URL=https://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=your_username
+      - ELASTICSEARCH_PASSWORD=your_password
+      - ELASTICSEARCH_CA_CERT_PATH=/app/ca.crt
+    volumes:
+      - ./config.json:/app/config.json
+      - ./ca.crt:/app/ca.crt
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.6.2
+    environment:
+      - xpack.security.enabled=false
+      - discovery.type=single-node
+    ports:
+      - "9200:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+
+volumes:
+  esdata:

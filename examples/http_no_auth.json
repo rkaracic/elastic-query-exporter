@@ -1,0 +1,15 @@
+{
+    "elasticsearch_url": "http://localhost:9200",
+    "queries_path": "/path/to/queries",
+    "prometheus_port": 8000,
+    "queries": [
+        {
+            "name": "upit1",
+            "type": "default",
+            "query": { 
+                ...
+            }
+        }
+    ]
+  }
+  
