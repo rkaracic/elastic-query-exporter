@@ -1,19 +1,29 @@
-FROM ubuntu:24.04
-
-RUN apt-get update && apt-get install -y ca-certificates openssl
-RUN update-ca-certificates
+FROM golang:1.19 as builder
 
 WORKDIR /app
 
+# Kopirajte Go module datoteke
 COPY go.mod go.sum ./
 
-RUN apt update && apt install -y golang-go
+# Preuzmite ovisnosti
 RUN go mod download
 
+# Kopirajte ostatak koda
 COPY . .
 
+# Kompajlirajte aplikaciju
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags '-extldflags "-static"' -o elastic_query_exporter main.go
 
-CMD ["./elastic_query_exporter", "-debug"]
+# Finalni image
+FROM alpine:latest
 
-EXPOSE 8000
+WORKDIR /app
+
+# Kopirajte binarni file iz buildera
+COPY --from=builder /app/elastic_query_exporter .
+
+# Kopirajte konfiguracijsku datoteku (ako nije mountana)
+COPY config.json ./config.json
+
+# Postavite defaultnu komandu
+CMD ["./elastic_query_exporter"]

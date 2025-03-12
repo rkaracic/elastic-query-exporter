@@ -108,11 +108,11 @@ func main() {
 		log.Println("Pokrenuto u debug modu")
 	}
 
-	configPath := "./config.json"
-	config, err := LoadConfig(configPath)
-	if err != nil {
-		log.Fatal(err)
-	}
+    configPath := "/app/config/config.json"
+    config, err := LoadConfig(configPath)
+    if err != nil {
+        log.Fatal(err)
+    }
 
 	caCert, err := ioutil.ReadFile(config.ElasticsearchCACertPath)
 	if err != nil {
