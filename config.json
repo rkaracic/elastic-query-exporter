@@ -9,20 +9,65 @@
     "query_interval": 30, // Globalni interval
     "queries": [
         {
-            "name": "query1",
+            "name": "custom_query1",
             "type": "raw",
             "query": {
-                // Vaš upit ovdje
+                "aggs": {
+                    "0": {
+                        "date_histogram": {
+                            "field": "@timestamp",
+                            "calendar_interval": "1d",
+                            "time_zone": "Europe/Zagreb",
+                            "extended_bounds": {
+                                "min": 1741250267923,
+                                "max": 1741855067923
+                            }
+                        }
+                    }
+                },
+                "size": 0,
+                "fields": [
+                    {
+                        "field": "@timestamp",
+                        "format": "date_time"
+                    }
+                ],
+                "script_fields": {},
+                "stored_fields": [
+                    "*"
+                ],
+                "runtime_mappings": {},
+                "_source": {
+                    "excludes": []
+                },
+                "query": {
+                    "bool": {
+                        "must": [],
+                        "filter": [
+                            {
+                                "range": {
+                                    "@timestamp": {
+                                        "format": "strict_date_optional_time",
+                                        "gte": "2025-03-06T08:37:47.923Z",
+                                        "lte": "2025-03-13T08:37:47.923Z"
+                                    }
+                                }
+                            }
+                        ],
+                        "should": [],
+                        "must_not": []
+                    }
+                }
             },
+            "metric_name": "elastic_query_exporter_custom_query1",
+            "labels": [
+                {
+                    "name": "date",
+                    "path": "key_as_string"
+                }
+            ],
+            "value_path": "doc_count",
             "interval": 60 // Poseban interval za query1
-        },
-        {
-            "name": "query2",
-            "type": "raw",
-            "query": {
-                // Vaš drugi upit ovdje
-            }
-            // Bez posebnog intervala, koristi se globalni interval
         }
     ]
 }

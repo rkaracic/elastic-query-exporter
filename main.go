@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/elastic/go-elasticsearch/v8"
@@ -27,7 +28,7 @@ type Config struct {
 	InsecureSkipVerify      bool    `json:"insecure_skip_verify"`
 	QueriesPath             string  `json:"queries_path"`
 	PrometheusPort          int     `json:"prometheus_port"`
-	QueryInterval           int     `json:"query_interval"` // Globalni query interval
+	QueryInterval           int     `json:"query_interval"` // Globalni interval
 	Queries                 []Query `json:"queries"`
 }
 
@@ -37,8 +38,14 @@ type Query struct {
 	Type       string                 `json:"type"` // raw ili default
 	Query      map[string]interface{} `json:"query"`
 	MetricName string                 `json:"metric_name"`
-	Labels     []string               `json:"labels"`
-	Interval   int                    `json:"interval"` // Query interval za pojedini query
+	Labels     []LabelMapping         `json:"labels"`
+	ValuePath  string                 `json:"value_path"`
+	Interval   *int                   `json:"interval"` // Sekunde
+}
+
+type LabelMapping struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
 }
 
 // Funkcija za učitavanje konfiguracije
@@ -86,40 +93,93 @@ func RunQuery(es *elasticsearch.Client, query Query) (interface{}, error) {
 	}
 
 	log.Printf("Rezultat upita %s dekodiran uspješno\n", query.Name)
+	log.Printf("Raw rezultat upita %s: %+v\n", query.Name, r)
 
 	return r, nil
 }
 
 // Funkcija za obradu rezultata
-func processResult(result interface{}, queryName string) {
-	log.Printf("Rezultat upita %s: %+v\n", queryName, result)
+func processResult(result interface{}, query Query) {
 	// Provjerite da li je rezultat validan
 	resultMap, ok := result.(map[string]interface{})
 	if !ok {
-		log.Printf("Rezultat za upit %s nije validan: %v\n", queryName, result)
+		log.Printf("Rezultat za upit %s nije validan: %v\n", query.Name, result)
 		return
 	}
 
-	hitsMap, ok := resultMap["hits"].(map[string]interface{})
+	aggregationsMap, ok := resultMap["aggregations"].(map[string]interface{})
 	if !ok {
-		log.Printf("Rezultat za upit %s nema 'hits': %v\n", queryName, resultMap)
+		log.Printf("Rezultat za upit %s nema 'aggregations': %v\n", query.Name, resultMap)
 		return
 	}
 
-	totalMap, ok := hitsMap["total"].(map[string]interface{})
+	buckets, ok := aggregationsMap["0"].(map[string]interface{})["buckets"].([]interface{})
 	if !ok {
-		log.Printf("Rezultat za upit %s nema 'total': %v\n", queryName, hitsMap)
+		log.Printf("Rezultat za upit %s nema 'buckets': %v\n", query.Name, aggregationsMap["0"])
 		return
 	}
 
-	value, ok := totalMap["value"].(float64)
-	if !ok {
-		log.Printf("Rezultat za upit %s nema 'value': %v\n", queryName, totalMap)
-		return
-	}
+	metricName := query.MetricName
+	labels := query.Labels
+	valuePath := query.ValuePath
 
-	// Postavite metriku ako je sve validno
-	elasticQueryHits.WithLabelValues(queryName).Set(value)
+	for _, bucket := range buckets {
+		bucketMap, ok := bucket.(map[string]interface{})
+		if !ok {
+			log.Printf("Bucket nije u očekivanom formatu: %v\n", bucket)
+			continue
+		}
+
+		value, err := getPathValue(bucketMap, valuePath)
+		if err != nil {
+			log.Printf("Greška pri izvlačenju vrijednosti iz bucketa: %v\n", err)
+			continue
+		}
+
+		labelValues := []string{}
+		for _, label := range labels {
+			labelValue, err := getPathValue(bucketMap, label.Path)
+			if err != nil {
+				log.Printf("Greška pri izvlačenju labela iz bucketa: %v\n", err)
+				continue
+			}
+			labelValues = append(labelValues, labelValue.(string))
+		}
+
+		// Postavite metriku ako je sve validno
+		metric := prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: metricName,
+				Help: fmt.Sprintf("Metrika za upit %s", query.Name),
+			},
+			append([]string{"query_name"}, getLabelNames(labels)...),
+		)
+		prometheus.MustRegister(metric)
+		metric.WithLabelValues(append([]string{query.Name}, labelValues...)...).Set(value.(float64))
+	}
+}
+
+func getPathValue(data map[string]interface{}, path string) (interface{}, error) {
+	parts := strings.Split(path, ".")
+	current := data
+	for _, part := range parts {
+		if current == nil {
+			return nil, fmt.Errorf("putanja %s nije validna", path)
+		}
+		current, ok := current[part]
+		if !ok {
+			return nil, fmt.Errorf("putanja %s nije validna", path)
+		}
+	}
+	return current, nil
+}
+
+func getLabelNames(labels []LabelMapping) []string {
+	names := []string{}
+	for _, label := range labels {
+		names = append(names, label.Name)
+	}
+	return names
 }
 
 // Funkcija za izlaganje metrika
@@ -195,10 +255,8 @@ func main() {
 
 	go func() {
 		for _, query := range config.Queries {
-			var interval time.Duration
-			if query.Interval != nil {
-				interval = time.Duration(*query.Interval) * time.Second
-			} else {
+			interval := time.Duration(query.Interval) * time.Second
+			if query.Interval == nil {
 				interval = time.Duration(config.QueryInterval) * time.Second
 			}
 
@@ -214,7 +272,7 @@ func main() {
 
 					log.Printf("Upit %s izvršen za %v ms\n", q.Name, time.Since(start).Milliseconds())
 
-					processResult(result, q.Name)
+					processResult(result, q)
 
 					duration := time.Since(start).Milliseconds()
 					elasticQueryDurationMilliseconds.WithLabelValues(q.Name).Set(float64(duration))
