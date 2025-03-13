@@ -161,12 +161,16 @@ func processResult(result interface{}, query Query) {
 
 func getPathValue(data map[string]interface{}, path string) (interface{}, error) {
 	parts := strings.Split(path, ".")
-	current := data
+	var current interface{} = data
 	for _, part := range parts {
 		if current == nil {
 			return nil, fmt.Errorf("putanja %s nije validna", path)
 		}
-		current, ok := current[part]
+		m, ok := current.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("putanja %s nije validna", path)
+		}
+		current, ok = m[part]
 		if !ok {
 			return nil, fmt.Errorf("putanja %s nije validna", path)
 		}
