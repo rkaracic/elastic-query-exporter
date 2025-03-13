@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -14,7 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/elastic/go-elasticsearch/v8"
+	v7 "github.com/elastic/go-elasticsearch/v7"
+	v8 "github.com/elastic/go-elasticsearch/v8"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -87,7 +89,7 @@ func LoadQueryFromFile(path string) (map[string]interface{}, error) {
 }
 
 // Funkcija za pokretanje upita
-func RunQuery(es *elasticsearch.Client, query Query) (interface{}, error) {
+func RunQuery(es interface{}, query Query) (interface{}, error) {
 	log.Printf("Pokrećem upit: %s\n", query.Name)
 
 	queryData, err := LoadQueryFromFile(query.QueryFile)
@@ -98,28 +100,53 @@ func RunQuery(es *elasticsearch.Client, query Query) (interface{}, error) {
 
 	reqBody, _ := json.Marshal(queryData)
 
-	res, err := es.Search(
-		es.Search.WithContext(context.Background()),
-		es.Search.WithBody(bytes.NewReader(reqBody)),
-		es.Search.WithTrackTotalHits(true),
-	)
+	var res io.ReadCloser
+
+	if es7, ok := es.(*v7.Client); ok {
+		res7, err := es7.Search(
+			es7.Search.WithContext(context.Background()),
+			es7.Search.WithBody(bytes.NewReader(reqBody)),
+			es7.Search.WithTrackTotalHits(true),
+		)
+		if err != nil {
+			log.Printf("Greška pri izvršavanju upita %s: %v\n", query.Name, err)
+			return nil, err
+		}
+		defer res7.Body.Close()
+		res = res7.Body
+	} else if es8, ok := es.(*v8.Client); ok {
+		res8, err := es8.Search(
+			es8.Search.WithContext(context.Background()),
+			es8.Search.WithBody(bytes.NewReader(reqBody)),
+			es8.Search.WithTrackTotalHits(true),
+		)
+		if err != nil {
+			log.Printf("Greška pri izvršavanju upita %s: %v\n", query.Name, err)
+			return nil, err
+		}
+		defer res8.Body.Close()
+		res = res8.Body
+	} else {
+		return nil, fmt.Errorf("nepoznati klijent")
+	}
+
+	// Dodajte zapisivanje sirovog odgovora u log
+	rawResponse, err := ioutil.ReadAll(res)
 	if err != nil {
-		log.Printf("Greška pri izvršavanju upita %s: %v\n", query.Name, err)
+		log.Printf("Greška pri čitanju odgovora za upit %s: %v\n", query.Name, err)
 		return nil, err
 	}
-	defer res.Body.Close()
+	log.Printf("Odgovor Elasticsearch-a za upit %s: %s\n", query.Name, string(rawResponse))
 
-	log.Printf("Upit %s izvršen uspješno\n", query.Name)
-
+	// Dekodiranje JSON odgovora
 	var r map[string]interface{}
-	err = json.NewDecoder(res.Body).Decode(&r)
+	err = json.NewDecoder(res).Decode(&r)
 	if err != nil {
 		log.Printf("Greška pri dekodiranju rezultata upita %s: %v\n", query.Name, err)
 		return nil, err
 	}
 
 	log.Printf("Rezultat upita %s dekodiran uspješno\n", query.Name)
-	log.Printf("Raw rezultat upita %s: %+v\n", query.Name, r)
 
 	return r, nil
 }
@@ -269,18 +296,35 @@ func main() {
 		}
 	}
 
-	esConfig := elasticsearch.Config{
-		Addresses: []string{config.ElasticsearchURL},
-		Username:  config.ElasticsearchUsername,
-		Password:  config.ElasticsearchPassword,
-		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
-		},
-	}
-
-	es, err := elasticsearch.NewClient(esConfig)
-	if err != nil {
-		log.Fatal(err)
+	var es interface{}
+	if config.ElasticsearchVersion == 7 {
+		esConfig := v7.Config{
+			Addresses: []string{config.ElasticsearchURL},
+			Username:  config.ElasticsearchUsername,
+			Password:  config.ElasticsearchPassword,
+			Transport: &http.Transport{
+				TLSClientConfig: tlsConfig,
+			},
+		}
+		es7, err := v7.NewClient(esConfig)
+		if err != nil {
+			log.Fatal(err)
+		}
+		es = es7
+	} else {
+		esConfig := v8.Config{
+			Addresses: []string{config.ElasticsearchURL},
+			Username:  config.ElasticsearchUsername,
+			Password:  config.ElasticsearchPassword,
+			Transport: &http.Transport{
+				TLSClientConfig: tlsConfig,
+			},
+		}
+		es8, err := v8.NewClient(esConfig)
+		if err != nil {
+			log.Fatal(err)
+		}
+		es = es8
 	}
 
 	go func() {
