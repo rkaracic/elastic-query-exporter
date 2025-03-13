@@ -255,8 +255,10 @@ func main() {
 
 	go func() {
 		for _, query := range config.Queries {
-			interval := time.Duration(query.Interval) * time.Second
-			if query.Interval == nil {
+			var interval time.Duration
+			if query.Interval != nil {
+				interval = time.Duration(int64(*query.Interval)) * time.Second
+			} else {
 				interval = time.Duration(config.QueryInterval) * time.Second
 			}
 
