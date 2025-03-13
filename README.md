@@ -45,6 +45,83 @@ docker-compose logs -f
 
 Konfiguracija se nalazi u `config.json`. Postavite URL, username, password i CA certifikat za Elasticsearch.
 
+### Tipovi upita
+
+Postoje dva tipa upita koji se mogu koristiti: `default` i `raw`.
+
+#### Default Type
+
+Upiti tipa `default` su dizajnirani za jednostavno izlaganje broja zapisa koji zadovoljavaju upit. Ovi upiti se automatski ažuriraju i izlažaju kao metrike u Prometheus-u.
+
+Primjer `default` upita:
+{
+    "name": "default_query",
+    "type": "default",
+    "query": {
+        "bool": {
+            "filter": [
+                {
+                    "match": {
+                        "device_type": "stb"
+                    }
+                }
+            ]
+        }
+    }
+}
+
+#### Raw Type
+
+Upiti tipa `raw` omogućavaju izvršavanje kompleksnijih upita koji se ne moraju nužno ažurirati kao metrike. Ovi upiti se mogu koristiti za specifične slučajeve gdje je potrebno izvršiti složenije agregacije ili upite.
+
+Primjer `raw` upita:
+{
+    "name": "raw_query",
+    "type": "raw",
+    "query": {
+        "aggs": {
+            "c858866f-a23d-44f0-8177-dadaa6d646f0": {
+                "date_histogram": {
+                    "field": "@timestamp",
+                    "calendar_interval": "1d",
+                    "time_zone": "Europe/Zagreb"
+                }
+            }
+        },
+        "size": 0,
+        "query": {
+            "bool": {
+                "filter": [
+                    {
+                        "match_all": {}
+                    },
+                    {
+                        "bool": {
+                            "should": [
+                                {
+                                    "match": {
+                                        "device_type": "stb"
+                                    }
+                                }
+                            ],
+                            "minimum_should_match": 1
+                        }
+                    },
+                    {
+                        "range": {
+                            "@timestamp": {
+                                "gte": "2025-03-05T06:44:53.137Z",
+                                "lte": "2025-03-12T06:44:53.137Z",
+                                "format": "strict_date_optional_time"
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}
+
 ## Upiti
 
 Definirajte upite u `config.json` pod `queries` sekcijom.
