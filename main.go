@@ -25,6 +25,7 @@ type Config struct {
 	ElasticsearchUsername   string  `json:"elasticsearch_username"`
 	ElasticsearchPassword   string  `json:"elasticsearch_password"`
 	ElasticsearchCACertPath string  `json:"elasticsearch_ca_cert_path"`
+	ElasticsearchVersion    int     `json:"elasticsearch_version"`
 	InsecureSkipVerify      bool    `json:"insecure_skip_verify"`
 	QueriesPath             string  `json:"queries_path"`
 	PrometheusPort          int     `json:"prometheus_port"`
