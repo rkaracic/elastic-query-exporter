@@ -34,19 +34,22 @@ type Config struct {
 
 // Struktura za upit
 type Query struct {
-	Name       string                 `json:"name"`
-	Type       string                 `json:"type"` // raw ili default
-	Query      map[string]interface{} `json:"query"`
-	MetricName string                 `json:"metric_name"`
-	Labels     []LabelMapping         `json:"labels"`
-	ValuePath  string                 `json:"value_path"`
-	Interval   *int                   `json:"interval"` // Sekunde
+	Name       string         `json:"name"`
+	Type       string         `json:"type"`       // raw ili default
+	QueryFile  string         `json:"query_file"` // Putanja do datoteke s upitom
+	MetricName string         `json:"metric_name"`
+	Labels     []LabelMapping `json:"labels"`
+	ValuePath  string         `json:"value_path"`
+	Interval   *int           `json:"interval"` // Sekunde
 }
 
 type LabelMapping struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 }
+
+// Mapa za držanje registriranih metrika
+var registeredMetrics = make(map[string]*prometheus.GaugeVec)
 
 // Funkcija za učitavanje konfiguracije
 func LoadConfig(path string) (*Config, error) {
@@ -66,11 +69,33 @@ func LoadConfig(path string) (*Config, error) {
 	return &config, nil
 }
 
+// Funkcija za učitavanje querya iz query filea
+func LoadQueryFromFile(path string) (map[string]interface{}, error) {
+	data, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("greška pri učitavanju upita iz datoteke %s: %v", path, err)
+	}
+
+	var query map[string]interface{}
+	err = json.Unmarshal(data, &query)
+	if err != nil {
+		return nil, fmt.Errorf("greška pri dekodiranju upita iz datoteke %s: %v", path, err)
+	}
+
+	return query, nil
+}
+
 // Funkcija za pokretanje upita
 func RunQuery(es *elasticsearch.Client, query Query) (interface{}, error) {
 	log.Printf("Pokrećem upit: %s\n", query.Name)
 
-	reqBody, _ := json.Marshal(query.Query)
+	queryData, err := LoadQueryFromFile(query.QueryFile)
+	if err != nil {
+		log.Printf("Greška pri učitavanju upita %s: %v\n", query.Name, err)
+		return nil, err
+	}
+
+	reqBody, _ := json.Marshal(queryData)
 
 	res, err := es.Search(
 		es.Search.WithContext(context.Background()),
@@ -100,7 +125,6 @@ func RunQuery(es *elasticsearch.Client, query Query) (interface{}, error) {
 
 // Funkcija za obradu rezultata
 func processResult(result interface{}, query Query) {
-	// Provjerite da li je rezultat validan
 	resultMap, ok := result.(map[string]interface{})
 	if !ok {
 		log.Printf("Rezultat za upit %s nije validan: %v\n", query.Name, result)
@@ -119,9 +143,18 @@ func processResult(result interface{}, query Query) {
 		return
 	}
 
-	metricName := query.MetricName
-	labels := query.Labels
-	valuePath := query.ValuePath
+	metric, ok := registeredMetrics[query.MetricName]
+	if !ok {
+		metric = prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: query.MetricName,
+				Help: fmt.Sprintf("Metrika za upit %s", query.Name),
+			},
+			append([]string{"query_name"}, getLabelNames(query.Labels)...),
+		)
+		prometheus.MustRegister(metric)
+		registeredMetrics[query.MetricName] = metric
+	}
 
 	for _, bucket := range buckets {
 		bucketMap, ok := bucket.(map[string]interface{})
@@ -130,49 +163,41 @@ func processResult(result interface{}, query Query) {
 			continue
 		}
 
-		value, err := getPathValue(bucketMap, valuePath)
+		value, err := getPathValue(bucketMap, query.ValuePath)
 		if err != nil {
 			log.Printf("Greška pri izvlačenju vrijednosti iz bucketa: %v\n", err)
 			continue
 		}
 
-		labelValues := []string{}
-		for _, label := range labels {
+		labelValues := []string{query.Name}
+		for _, label := range query.Labels {
 			labelValue, err := getPathValue(bucketMap, label.Path)
 			if err != nil {
 				log.Printf("Greška pri izvlačenju labela iz bucketa: %v\n", err)
 				continue
 			}
-			labelValues = append(labelValues, labelValue.(string))
+			labelValues = append(labelValues, fmt.Sprintf("%v", labelValue))
 		}
 
-		// Postavite metriku ako je sve validno
-		metric := prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Name: metricName,
-				Help: fmt.Sprintf("Metrika za upit %s", query.Name),
-			},
-			append([]string{"query_name"}, getLabelNames(labels)...),
-		)
-		prometheus.MustRegister(metric)
-		metric.WithLabelValues(append([]string{query.Name}, labelValues...)...).Set(value.(float64))
+		metric.WithLabelValues(labelValues...).Set(value.(float64))
 	}
 }
 
 func getPathValue(data map[string]interface{}, path string) (interface{}, error) {
 	parts := strings.Split(path, ".")
-	var current interface{} = data
+	current := data
 	for _, part := range parts {
 		if current == nil {
 			return nil, fmt.Errorf("putanja %s nije validna", path)
 		}
-		m, ok := current.(map[string]interface{})
+		value, ok := current[part]
 		if !ok {
 			return nil, fmt.Errorf("putanja %s nije validna", path)
 		}
-		current, ok = m[part]
-		if !ok {
-			return nil, fmt.Errorf("putanja %s nije validna", path)
+		if mapValue, isMap := value.(map[string]interface{}); isMap {
+			current = mapValue
+		} else {
+			return value, nil
 		}
 	}
 	return current, nil
@@ -259,16 +284,13 @@ func main() {
 
 	go func() {
 		for _, query := range config.Queries {
-			var interval time.Duration
+			interval := time.Duration(config.QueryInterval) * time.Second
 			if query.Interval != nil {
-				interval = time.Duration(int64(*query.Interval)) * time.Second
-			} else {
-				interval = time.Duration(config.QueryInterval) * time.Second
+				interval = time.Duration(*query.Interval) * time.Second
 			}
 
 			go func(q Query, i time.Duration) {
 				for {
-					// Izvršavanje upita...
 					start := time.Now()
 					result, err := RunQuery(es, q)
 					if err != nil {
@@ -277,7 +299,6 @@ func main() {
 					}
 
 					log.Printf("Upit %s izvršen za %v ms\n", q.Name, time.Since(start).Milliseconds())
-
 					processResult(result, q)
 
 					duration := time.Since(start).Milliseconds()
