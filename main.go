@@ -138,9 +138,9 @@ func RunQuery(es interface{}, query Query) (interface{}, error) {
 	}
 	log.Printf("Odgovor Elasticsearch-a za upit %s: %s\n", query.Name, string(rawResponse))
 
-	// Dekodiranje JSON odgovora
+	// Dekodiranje JSON odgovora iz već pročitanog rawResponse
 	var r map[string]interface{}
-	err = json.NewDecoder(res).Decode(&r)
+	err = json.Unmarshal(rawResponse, &r)
 	if err != nil {
 		log.Printf("Greška pri dekodiranju rezultata upita %s: %v\n", query.Name, err)
 		return nil, err
