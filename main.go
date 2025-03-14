@@ -165,9 +165,30 @@ func processResult(result interface{}, query Query) {
 		return
 	}
 
-	buckets, ok := aggregationsMap["0"].(map[string]interface{})["buckets"].([]interface{})
-	if !ok {
-		log.Printf("Rezultat za upit %s nema 'buckets': %v\n", query.Name, aggregationsMap["0"])
+	var buckets []interface{}
+	found := false
+
+	for _, agg := range aggregationsMap {
+		aggMap, ok := agg.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		bucketsInterface, exists := aggMap["buckets"]
+		if !exists {
+			continue
+		}
+
+		bucketsSlice, ok := bucketsInterface.([]interface{})
+		if ok {
+			buckets = bucketsSlice
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		log.Printf("Nisam pronašao 'buckets' u rezultatu za upit %s\n", query.Name)
 		return
 	}
 
@@ -207,7 +228,13 @@ func processResult(result interface{}, query Query) {
 			labelValues = append(labelValues, fmt.Sprintf("%v", labelValue))
 		}
 
-		metric.WithLabelValues(labelValues...).Set(value.(float64))
+		valueFloat, ok := value.(float64)
+		if ok {
+			metric.WithLabelValues(labelValues...).Set(valueFloat)
+		} else {
+			log.Printf("Vrijednost nije float64: %v\n", value)
+			continue
+		}
 	}
 }
 
